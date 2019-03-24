@@ -1,6 +1,7 @@
 {
 open Lexing
 open Vlog_Parser
+open Big_int
 
 exception Error of string
 
@@ -41,82 +42,16 @@ let keyword_map =
   |> List.to_seq |> M.of_seq
 
 let convert_bin_literal s =
-  let rec f i =
-    if i = 0
-    then (0, 0)
-    else
-      let a', b' = f (i-1) in
-      let c = s.[i-1] in
-      match c with
-      | 'x' | 'X' ->
-          a' lsl 1 lor 1, b' lsl 1 lor 1
-      | 'z' | 'Z' | '?' ->
-          a' lsl 1 lor 0, b' lsl 1 lor 1
-      | '0' | '1' ->
-          let d = int_of_char c - 0x30 in
-          a' lsl 1 lor d, b' lsl 1 lor 0
-      | _ -> assert false
-  in
-  let a, b = f (String.length s) in
-  Literal (a, b)
+  big_int_of_string ("0b" ^ s)
 
 let convert_oct_literal s =
-  let rec f i =
-    if i = 0
-    then (0, 0)
-    else
-      let a', b' = f (i-1) in
-      let c = s.[i-1] in
-      match c with
-      | 'x' | 'X' ->
-          a' lsl 3 lor 7, b' lsl 3 lor 7
-      | 'z' | 'Z' | '?' ->
-          a' lsl 3 lor 0, b' lsl 3 lor 7
-      | '0'..'7' ->
-          let d = int_of_char c - 0x30 in
-          a' lsl 3 lor d, b' lsl 3 lor 0
-      | _ -> assert false
-  in
-  let a, b = f (String.length s) in
-  Literal (a, b)
-
-let hex_value c =
-  let b = int_of_char c in
-  if b > 0x40 then (b lor 32) - 87 else b-48
+  big_int_of_string ("0o" ^ s)
 
 let convert_hex_literal s =
-  let rec f i =
-    if i = 0
-    then (0, 0)
-    else
-      let a', b' = f (i-1) in
-      let c = s.[i-1] in
-      match c with
-      | 'x' | 'X' ->
-          a' lsl 4 lor 0xf, b' lsl 4 lor 0xf
-      | 'z' | 'Z' | '?' ->
-          a' lsl 4 lor 0, b' lsl 4 lor 0xf
-      | '0'..'9' | 'A'..'F' | 'a'..'f' ->
-          let d = hex_value c in
-          a' lsl 4 lor d, b' lsl 4 lor 0
-      | _ -> assert false
-  in
-  let a, b = f (String.length s) in
-  Literal (a, b)
+  big_int_of_string ("0x" ^ s)
 
 let convert_dec_literal s =
-  let rec f i =
-    if i = 0
-    then 0
-    else
-      let a' = f (i-1) in
-      let c = s.[i-1] in
-      match c with
-      | '0'..'9' ->
-          a' * 10 + (int_of_char c - 0x30)
-      | _ -> assert false
-  in
-  Literal (f (String.length s), 0)
+  big_int_of_string s
 
 }
 
@@ -155,13 +90,13 @@ rule token = parse
   | "/*" { comment lexbuf }
   | '\n' { next_line lexbuf; token lexbuf }
   | dec_base white_char* (dec_number as value)
-    { convert_dec_literal value }
+    { DecLit (convert_dec_literal value) }
   | bin_base white_char* (bin_number' as value)
-    { convert_bin_literal value }
+    { BinLit (convert_bin_literal value) }
   | oct_base white_char* (oct_number' as value)
-    { convert_oct_literal value }
+    { OctLit (convert_oct_literal value) }
   | hex_base white_char* (hex_number' as value)
-    { convert_hex_literal value }
+    { HexLit (convert_hex_literal value) }
   | ident as s
     { match M.find_opt s keyword_map with Some k -> k | None -> Ident s }
   | dec_number as s { Int (int_of_string s) }

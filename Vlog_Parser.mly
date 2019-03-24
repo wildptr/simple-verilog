@@ -1,9 +1,13 @@
 %{
-open Vlog_AST
+module S = Vlog_AST
+open S
 %}
 
 %token EOF
-%token <int * int> Literal
+%token <Big_int.big_int> DecLit
+%token <Big_int.big_int> BinLit
+%token <Big_int.big_int> OctLit
+%token <Big_int.big_int> HexLit
 %token <string> Ident
 %token <int> Int
 
@@ -120,10 +124,10 @@ port_decl_comma:
     {{ port_dir; port_is_reg; port_range_opt; port_declarators }}
 
 assign_lhs:
-  | sym = Ident; indices = list(index)
-    { E_select (sym, indices) }
+  | name = Ident; indices = list(index)
+    {{ e_desc = E_select (name, indices); e_loc = $loc }}
   | LBrace; exprs = separated_nonempty_list(Comma, assign_lhs); RBrace
-    { E_concat exprs }
+    {{ e_desc = E_concat exprs; e_loc = $loc }}
 
 index:
   | LBrack; msb = expr; Colon; lsb = expr; RBrack
@@ -134,92 +138,99 @@ index:
     { Part_var (base, width) }
 
 primary_expr:
-  | value = Int
-    { E_literal (Literal.make_unsized value) }
-  | width = Int; value = Literal
-    { E_literal (Literal.make width value) }
-  | sym = Ident; indices = list(index)
-    { E_select (sym, indices) }
-  | LParen; e = expr; RParen {e}
+  | Int
+    {{ e_desc = E_int $1; e_loc = $loc }}
+  | Int DecLit {{ e_desc = E_bitvec (Dec, Some $1, $2); e_loc = $loc }}
+  | Int BinLit {{ e_desc = E_bitvec (Bin, Some $1, $2); e_loc = $loc }}
+  | Int OctLit {{ e_desc = E_bitvec (Oct, Some $1, $2); e_loc = $loc }}
+  | Int HexLit {{ e_desc = E_bitvec (Hex, Some $1, $2); e_loc = $loc }}
+  | DecLit {{ e_desc = E_bitvec (Dec, None, $1); e_loc = $loc }}
+  | BinLit {{ e_desc = E_bitvec (Bin, None, $1); e_loc = $loc }}
+  | OctLit {{ e_desc = E_bitvec (Oct, None, $1); e_loc = $loc }}
+  | HexLit {{ e_desc = E_bitvec (Hex, None, $1); e_loc = $loc }}
+  | name = Ident; indices = list(index)
+    {{ e_desc = E_select (name, indices); e_loc = $loc }}
+  | LParen; e = expr; RParen {{ e with e_loc = $loc }}
   | LBrace; exprs = separated_nonempty_list(Comma, expr); RBrace
-    { E_concat exprs }
+    {{ e_desc = E_concat exprs; e_loc = $loc }}
   | LBrace; n = expr; LBrace; e = expr; RBrace; RBrace
-    { E_duplicate (n, e) }
+    {{ e_desc = E_duplicate (n, e); e_loc = $loc }}
 
 prefix_op:
-  | Tilde { U_not        }
-  | Amp   { U_reduce_and }
-  | Bar   { U_reduce_or  }
+  | Tilde { Not        }
+  | Amp   { Reduce_And }
+  | Bar   { Reduce_Or  }
 
 prefix_expr:
-  | e = primary_expr {e}
-  | op = prefix_op; e = prefix_expr { E_unary (op, e) }
+  | primary_expr {$1}
+  | op = prefix_op; e = prefix_expr
+    {{ e_desc = E_unary (op, e); e_loc = $loc }}
 
 mul_op:
-  | Star { B_mul }
+  | Star { Mul }
 
 mul_expr:
   | e = prefix_expr {e}
   | e1 = mul_expr; op = mul_op; e2 = prefix_expr
-    { E_binary (op, e1, e2) }
+    {{ e_desc = E_binary (op, e1, e2); e_loc = $loc }}
 
 add_op:
-  | Plus  { B_add }
-  | Minus { B_sub }
+  | Plus  { Add }
+  | Minus { Sub }
 
 add_expr:
   | e = mul_expr {e}
   | e1 = add_expr; op = add_op; e2 = mul_expr
-    { E_binary (op, e1, e2) }
+    {{ e_desc = E_binary (op, e1, e2); e_loc = $loc }}
 
 shift_op:
-  | LtLt { B_shiftL }
-  | GtGt { B_shiftR }
+  | LtLt { ShiftL }
+  | GtGt { ShiftR }
 
 shift_expr:
   | e = add_expr {e}
   | e1 = shift_expr; op = shift_op; e2 = add_expr
-    { E_binary (op, e1, e2) }
+    {{ e_desc = E_binary (op, e1, e2); e_loc = $loc }}
 
 rel_op:
-  | Lt   { B_lt }
-  | GtEq { B_ge }
-  | Gt   { B_gt }
-  | LtEq { B_le }
+  | Lt   { S.Lt }
+  | GtEq { S.GtEq }
+  | Gt   { S.Gt }
+  | LtEq { S.LtEq }
 
 rel_expr:
   | e = shift_expr {e}
   | e1 = rel_expr; op = rel_op; e2 = shift_expr
-    { E_binary (op, e1, e2) }
+    {{ e_desc = E_binary (op, e1, e2); e_loc = $loc }}
 
 eq_op:
-  | EqEq   { B_eq  }
-  | BangEq { B_neq }
+  | EqEq   { S.Eq  }
+  | BangEq { NotEq }
 
 eq_expr:
   | e = rel_expr {e}
   | e1 = eq_expr; op = eq_op; e2 = rel_expr
-    { E_binary (op, e1, e2) }
+    {{ e_desc = E_binary (op, e1, e2); e_loc = $loc }}
 
 and_expr:
   | e = eq_expr {e}
   | e1 = and_expr; Amp; e2 = eq_expr
-    { E_binary (B_and, e1, e2) }
+    {{ e_desc = E_binary (And, e1, e2); e_loc = $loc }}
 
 xor_expr:
   | e = and_expr {e}
   | e1 = xor_expr; Caret; e2 = and_expr
-    { E_binary (B_xor, e1, e2) }
+    {{ e_desc = E_binary (Xor, e1, e2); e_loc = $loc }}
 
 or_expr:
   | e = xor_expr {e}
   | e1 = xor_expr; Bar; e2 = or_expr
-    { E_binary (B_or, e1, e2) }
+    {{ e_desc = E_binary (Or, e1, e2); e_loc = $loc }}
 
 cond_expr:
   | e = or_expr {e}
   | e_cond = or_expr; Quest; e_true = expr; Colon; e_false = expr
-    { E_cond (e_cond, e_true, e_false) }
+    {{ e_desc = E_cond (e_cond, e_true, e_false); e_loc = $loc }}
 
 expr:
   | e = cond_expr {e}
