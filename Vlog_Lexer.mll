@@ -41,17 +41,30 @@ let keyword_map =
   ]
   |> List.to_seq |> M.of_seq
 
+let replace_xz s =
+  let n = String.length s in
+  let b = Bytes.create n in
+  for i=0 to n-1 do
+    let c =
+      match s.[i] with
+      | 'x' | 'X' | 'z' | 'Z' -> '0'
+      | c -> c
+    in
+    Bytes.set b i c
+  done;
+  Bytes.to_string b
+
 let convert_bin_literal s =
-  big_int_of_string ("0b" ^ s)
+  Z.of_string ("0b" ^ (replace_xz s))
 
 let convert_oct_literal s =
-  big_int_of_string ("0o" ^ s)
+  Z.of_string ("0o" ^ (replace_xz s))
 
 let convert_hex_literal s =
-  big_int_of_string ("0x" ^ s)
+  Z.of_string ("0x" ^ (replace_xz s))
 
 let convert_dec_literal s =
-  big_int_of_string s
+  Z.of_string (replace_xz s)
 
 }
 

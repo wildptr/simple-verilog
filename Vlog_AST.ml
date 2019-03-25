@@ -1,5 +1,4 @@
 open ExtLib
-open Big_int
 
 type signal_type =
   | Wire
@@ -92,7 +91,7 @@ type radix = Dec | Bin | Oct | Hex
 type expr_desc =
   | E_select of string * index list
   | E_int of int
-  | E_bitvec of radix * int option * big_int
+  | E_bitvec of radix * int option * Z.t
   | E_cond of expr * expr * expr
   | E_binary of binary_op * expr * expr
   | E_unary of unary_op * expr
@@ -200,17 +199,21 @@ let rec pp_proc ind f proc =
     end;
     fprintf f "%sendcase\n" ind
 
-type signal_declarator = string * (expr * expr) list * expr option
+type signal_declarator = {
+  sig_name : string;
+  sig_dims : (expr * expr) list;
+  sig_value_opt : expr option
+}
 
-let pp_signal_declarator f (name, dims, eq_expr_opt) =
+let pp_signal_declarator f s =
   let open Format in
-  fprintf f "%s" name;
-  dims |> List.iter begin fun (e1, e2) ->
+  fprintf f "%s" s.sig_name;
+  s.sig_dims |> List.iter begin fun (e1, e2) ->
     fprintf f "[%a:%a]" pp_expr e1 pp_expr e2
   end;
-  match eq_expr_opt with
+  match s.sig_value_opt with
   | None -> ()
-  | Some eq_expr -> fprintf f " = %a" pp_expr eq_expr
+  | Some value -> fprintf f " = %a" pp_expr value
 
 type signal_decl = {
   sig_type : signal_type;
@@ -290,24 +293,27 @@ type always_block = sensitivity * proc
 let pp_always_block f (sens, proc) =
   Format.fprintf f "always @@%a\n%a" pp_sensitivity sens (pp_proc "  ") proc
 
-type decl =
-  | Decl_signal of signal_decl
-  | Decl_assign of assign
-  | Decl_instance of instance
-  | Decl_always of always_block
+type item =
+  | Item_signal of signal_decl
+  | Item_assign of assign
+  | Item_instance of instance
+  | Item_always of always_block
+  | Item_port_decl of port_decl
 
-let pp_decl f = function
-  | Decl_signal sigdecl -> Format.fprintf f "%a;\n" pp_signal_decl sigdecl
-  | Decl_assign (lhs, rhs) ->
-      Format.fprintf f "assign %a = %a;\n" pp_expr lhs pp_expr rhs
-  | Decl_instance inst -> pp_instance f inst
-  | Decl_always always -> pp_always_block f always
+let pp_item f = function
+  | Item_signal sigdecl -> Format.fprintf f "%a;\n" pp_signal_decl sigdecl
+  | Item_assign (lhs, rhs) ->
+    Format.fprintf f "assign %a = %a;\n" pp_expr lhs pp_expr rhs
+  | Item_instance inst -> pp_instance f inst
+  | Item_always always -> pp_always_block f always
+  | Item_port_decl port_decl ->
+    Format.fprintf f "%a;\n" pp_port_decl port_decl
 
 type module_ = {
   mod_name : string;
   mod_params : signal_decl list;
-  mod_ports : port_decl list;
-  mod_decls : decl list;
+  mod_ports : string list;
+  mod_items : item list;
 }
 
 let pp_module f m =
@@ -321,11 +327,36 @@ let pp_module f m =
       if i < n-1 then fprintf f ", ");
     fprintf f ");";
   end;*)
-  fprintf f "(";
+(*fprintf f "(";
   let n = List.length m.mod_ports in
   m.mod_ports |> List.iteri (fun i port_decl ->
     fprintf f "\n  %a" pp_port_decl port_decl;
     if i < n-1 then fprintf f ",");
-  fprintf f "\n);\n";
-  List.iter (pp_decl f) m.mod_decls;
+  fprintf f "\n);\n";*)
+  begin match m.mod_ports with
+  | [] -> ()
+  | hd::tl ->
+    fprintf f "(%s" hd;
+    List.iter (fprintf f ", %s") tl;
+    pp_print_char f ')';
+  end;
+  pp_print_char f '\n';
+  List.iter (pp_item f) m.mod_items;
   fprintf f "endmodule"
+
+let make_module_old name params ports items =
+  { mod_name = name;
+    mod_params = params;
+    mod_ports = ports;
+    mod_items = items }
+
+let make_module_new name params ports items =
+  let mod_ports =
+    ports |> List.map begin fun port_decl ->
+      port_decl.port_declarators |> List.map (fun sig_decl -> sig_decl.sig_name)
+    end |> List.concat
+  in
+  { mod_name = name;
+    mod_params = params;
+    mod_ports;
+    mod_items = items }

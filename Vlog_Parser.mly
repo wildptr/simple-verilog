@@ -4,10 +4,10 @@ open S
 %}
 
 %token EOF
-%token <Big_int.big_int> DecLit
-%token <Big_int.big_int> BinLit
-%token <Big_int.big_int> OctLit
-%token <Big_int.big_int> HexLit
+%token <Z.t> DecLit
+%token <Z.t> BinLit
+%token <Z.t> OctLit
+%token <Z.t> HexLit
 %token <string> Ident
 %token <int> Int
 
@@ -74,7 +74,7 @@ open S
 %type <always_block> always_block
 %type <assign> assign
 %type <port_decl> port_decl
-%type <decl> decl
+%type <item> item
 %type <expr> expr
 %type <proc> proc
 
@@ -87,11 +87,19 @@ open S
 %%
 
 top:
-  | MODULE; mod_name = Ident;
-    mod_params = loption(preceded(Hash, delimited(LParen, comma_sep_signal_decl_list, RParen)));
-    mod_ports = loption(delimited(LParen, comma_sep_port_decl_list, RParen)); Semi;
-    mod_decls = list(decl); ENDMODULE; EOF
-    {{ mod_name; mod_params; mod_ports; mod_decls }}
+  | module_ EOF {$1}
+
+module_:
+  | MODULE; name = Ident;
+    params = loption(preceded(Hash, delimited(LParen, comma_sep_signal_decl_list, RParen)));
+    ports = delimited(LParen, comma_sep_port_decl_list, RParen); Semi;
+    items = list(item); ENDMODULE
+    { make_module_new name params ports items }
+  | MODULE; name = Ident;
+    params = loption(preceded(Hash, delimited(LParen, comma_sep_signal_decl_list, RParen)));
+    ports = loption(delimited(LParen, separated_list(Comma, Ident), RParen)); Semi;
+    items = list(item); ENDMODULE
+    { make_module_old name params ports items }
 
 (* prevents an unresolvable shift/reduce conflict on Comma *)
 comma_sep_signal_decl_list:
@@ -248,7 +256,7 @@ signal_type:
 signal_declarator:
   | name = Ident; array_dim = list(range_spec);
     eq_expr_opt = preceded(Eq, expr)?
-    { name, array_dim, eq_expr_opt }
+    {{ sig_name = name; sig_dims = array_dim; sig_value_opt = eq_expr_opt }}
 
 signal_decl:
   | sig_type = signal_type; sig_range_opt = range_spec?;
@@ -307,12 +315,16 @@ always_block:
   | ALWAYS; At; sens = sensitivity; proc = proc
     { sens, proc }
 
-decl:
-  | decl = signal_decl; Semi
-    { Decl_signal decl }
-  | decl = assign
-    { Decl_assign decl }
-  | decl = instance
-    { Decl_instance decl }
-  | decl = always_block
-    { Decl_always decl }
+item:
+  | signal_decl Semi
+    { Item_signal $1 }
+  | assign
+    { Item_assign $1 }
+  | instance
+    { Item_instance $1 }
+  | always_block
+    { Item_always $1 }
+  | port_decl Semi
+    { Item_port_decl $1 }
+
+(* vim: set indentexpr=: *)
