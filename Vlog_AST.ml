@@ -1,6 +1,6 @@
 open ExtLib
 
-type signal_type =
+type obj_kind =
   | Wire
   | Reg
   | Localparam
@@ -96,7 +96,7 @@ type expr_desc =
   | E_binary of binary_op * expr * expr
   | E_unary of unary_op * expr
   | E_concat of expr list
-  | E_duplicate of expr * expr
+  | E_replicate of expr * expr
 
 and expr = {
   e_desc : expr_desc;
@@ -107,6 +107,9 @@ and index =
   | Bit of expr
   | Part_const of expr * expr
   | Part_var of expr * expr
+
+let mk_expr e_desc e_loc =
+  { e_desc; e_loc }
 
 let rec pp_expr f expr =
   let open Format in
@@ -122,7 +125,7 @@ let rec pp_expr f expr =
       | Some width -> string_of_int width
       | None -> ""
     and radix_char =
-      match radix with 
+      match radix with
       | Dec -> 'd'
       | Bin -> 'b'
       | Oct -> 'o'
@@ -146,7 +149,7 @@ let rec pp_expr f expr =
         if i < n-1 then fprintf f ","
       end;
       fprintf f "}"
-  | E_duplicate (e_n, e_data) ->
+  | E_replicate (e_n, e_data) ->
       fprintf f "{%a{%a}}" pp_expr e_n pp_expr e_data
 
 and pp_index f index =
@@ -199,26 +202,26 @@ let rec pp_proc ind f proc =
     end;
     fprintf f "%sendcase\n" ind
 
-type signal_declarator = {
-  sig_name : string;
-  sig_dims : (expr * expr) list;
-  sig_value_opt : expr option
+type declarator = {
+  d_name : string;
+  d_dims : (expr * expr) list;
+  d_value_opt : expr option
 }
 
 let pp_signal_declarator f s =
   let open Format in
-  fprintf f "%s" s.sig_name;
-  s.sig_dims |> List.iter begin fun (e1, e2) ->
+  fprintf f "%s" s.d_name;
+  s.d_dims |> List.iter begin fun (e1, e2) ->
     fprintf f "[%a:%a]" pp_expr e1 pp_expr e2
   end;
-  match s.sig_value_opt with
+  match s.d_value_opt with
   | None -> ()
   | Some value -> fprintf f " = %a" pp_expr value
 
-type signal_decl = {
-  sig_type : signal_type;
-  sig_range_opt : (expr * expr) option;
-  sig_declarators : signal_declarator list;
+type decl = {
+  d_kind : obj_kind;
+  d_range_opt : (expr * expr) option;
+  d_declarators : declarator list;
 }
 
 type port_direction = Input | Output | Inout
@@ -232,7 +235,7 @@ type port_decl = {
   port_dir : port_direction;
   port_is_reg : bool;
   port_range_opt : (expr * expr) option;
-  port_declarators : signal_declarator list;
+  port_declarators : declarator list;
 }
 
 let pp_range f (msb, lsb) =
@@ -256,14 +259,14 @@ let pp_port_decl f port =
 
 let pp_signal_decl f sigdecl =
   let open Format in
-  fprintf f "%a" pp_signal_type sigdecl.sig_type;
-  begin match sigdecl.sig_range_opt with
+  fprintf f "%a" pp_signal_type sigdecl.d_kind;
+  begin match sigdecl.d_range_opt with
   | None -> ()
   | Some range -> fprintf f " %a" pp_range range
   end;
   fprintf f " ";
-  let n = List.length sigdecl.sig_declarators in
-  sigdecl.sig_declarators |> List.iteri begin fun i declr ->
+  let n = List.length sigdecl.d_declarators in
+  sigdecl.d_declarators |> List.iteri begin fun i declr ->
     pp_signal_declarator f declr;
     if i < n-1 then fprintf f ", "
   end
@@ -294,14 +297,14 @@ let pp_always_block f (sens, proc) =
   Format.fprintf f "always @@%a\n%a" pp_sensitivity sens (pp_proc "  ") proc
 
 type item =
-  | Item_signal of signal_decl
+  | Item_decl of decl
   | Item_assign of assign
   | Item_instance of instance
   | Item_always of always_block
   | Item_port_decl of port_decl
 
 let pp_item f = function
-  | Item_signal sigdecl -> Format.fprintf f "%a;\n" pp_signal_decl sigdecl
+  | Item_decl sigdecl -> Format.fprintf f "%a;\n" pp_signal_decl sigdecl
   | Item_assign (lhs, rhs) ->
     Format.fprintf f "assign %a = %a;\n" pp_expr lhs pp_expr rhs
   | Item_instance inst -> pp_instance f inst
@@ -311,7 +314,7 @@ let pp_item f = function
 
 type module_ = {
   mod_name : string;
-  mod_params : signal_decl list;
+  mod_params : decl list;
   mod_ports : string list;
   mod_items : item list;
 }
@@ -353,7 +356,7 @@ let make_module_old name params ports items =
 let make_module_new name params ports items =
   let mod_ports =
     ports |> List.map begin fun port_decl ->
-      port_decl.port_declarators |> List.map (fun sig_decl -> sig_decl.sig_name)
+      port_decl.port_declarators |> List.map (fun sig_decl -> sig_decl.d_name)
     end |> List.concat
   in
   { mod_name = name;
